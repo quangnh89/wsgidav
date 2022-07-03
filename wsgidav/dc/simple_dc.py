@@ -126,6 +126,9 @@ class SimpleDomainController(BaseDomainController):
             return True
         return False
 
+    def bearer_token(self, realm, token, environ):
+        return False
+
     def supports_http_digest_auth(self):
         # We have access to a plaintext password (or stored hash)
         return True

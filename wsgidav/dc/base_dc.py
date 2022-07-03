@@ -166,6 +166,28 @@ class BaseDomainController(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def bearer_token(self, realm, token, environ):
+        """Check request access permissions for realm/user_name/password.
+
+        Called by http_authenticator for basic authentication requests.
+
+        Optionally set environment variables:
+
+            environ["wsgidav.auth.roles"] = (<role>, ...)
+            environ["wsgidav.auth.permissions"] = (<perm>, ...)
+
+        Args:
+            realm (str):
+            user_name (str):
+            password (str):
+            environ (dict):
+        Returns:
+            False if user is not known or not authorized
+            True if user is authorized
+        """
+        raise NotImplementedError
+
+    @abstractmethod
     def supports_http_digest_auth(self):
         """Signal if this DC instance supports the HTTP digest authentication theme.
 
@@ -234,5 +256,16 @@ class BaseDomainController(ABC):
         Returns:
             str: MD5("{usern_name}:{realm}:{password}")
             or false if user is unknown or rejected
+        """
+        raise NotImplementedError
+    @abstractmethod
+    def supports_http_digest_auth(self):
+        """Signal if this DC instance supports the HTTP digest authentication theme.
+
+        If true, `HTTPAuthenticator` will call `dc.digest_auth_user()`,
+        so this method must be implemented as well.
+
+        Returns:
+            bool
         """
         raise NotImplementedError

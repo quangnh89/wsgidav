@@ -162,12 +162,13 @@ class HTTPAuthenticator(BaseMiddleware):
         auth_conf = util.get_dict_value(config, "http_authenticator", as_dict=True)
 
         self.accept_basic = auth_conf.get("accept_basic", True)
+        self.accept_bearer = auth_conf.get("accept_bearer", True)
         self.accept_digest = auth_conf.get("accept_digest", True)
         self.default_to_digest = auth_conf.get("default_to_digest", True)
         self.trusted_auth_header = auth_conf.get("trusted_auth_header", None)
 
         if not dc.supports_http_digest_auth() and (
-            self.accept_digest or self.default_to_digest or not self.accept_basic
+            self.accept_digest or self.default_to_digest or not self.accept_basic or not self.accept_bearer
         ):
             raise RuntimeError(
                 "{} does not support digest authentication.\n"
@@ -250,12 +251,16 @@ class HTTPAuthenticator(BaseMiddleware):
                 return self.send_basic_auth_response(environ, start_response)
             elif auth_method == "basic" and self.accept_basic:
                 return self.handle_basic_auth_request(environ, start_response)
+            elif auth_method == "bearer" and self.accept_bearer:
+                return self.handle_bearer_request(environ, start_response)
 
             # The requested auth method is not supported.
             elif self.default_to_digest and self.accept_digest:
                 return self.send_digest_auth_response(environ, start_response)
             elif self.accept_basic:
                 return self.send_basic_auth_response(environ, start_response)
+            elif self.accept_bearer:
+                return self.send_bearer_response(environ, start_response)
 
             _logger.warning(
                 "HTTPAuthenticator: respond with 400 Bad request; Auth-Method: {}".format(
@@ -272,6 +277,47 @@ class HTTPAuthenticator(BaseMiddleware):
         if self.default_to_digest:
             return self.send_digest_auth_response(environ, start_response)
         return self.send_basic_auth_response(environ, start_response)
+
+    def send_bearer_response(self, environ, start_response):
+        realm = self.domain_controller.get_domain_realm(environ["PATH_INFO"], environ)
+        _logger.debug("401 Not Authorized for realm '{}' (bearer)".format(realm))
+        wwwauthheaders = 'Basic realm="{}"'.format(realm)
+
+        body = util.to_bytes(self.error_message_401)
+        start_response(
+            "401 Not Authorized",
+            [
+                ("WWW-Authenticate", wwwauthheaders),
+                ("Content-Type", "text/html; charset=utf-8"),
+                ("Content-Length", str(len(body))),
+                ("Date", util.get_rfc1123_time()),
+            ],
+        )
+        return [body]
+
+    def handle_bearer_request(self, environ, start_response):
+        realm = self.domain_controller.get_domain_realm(environ["PATH_INFO"], environ)
+        auth_header = environ["HTTP_AUTHORIZATION"]
+        auth_value = ""
+        try:
+            auth_value = auth_header[len("Bearer ") :].strip()
+        except Exception:
+            auth_value = ""
+
+        bearer_token = auth_value
+        user_name = self.domain_controller.bearer_token(realm, bearer_token, environ)
+        if user_name:
+            environ["wsgidav.auth.realm"] = realm
+            environ["wsgidav.auth.user_name"] = user_name
+            return self.next_app(environ, start_response)
+
+        _logger.warning(
+            "Authentication (basic) failed, realm '{}'.".format(
+                realm
+            )
+        )
+        return self.send_bearer_response(environ, start_response)
+
 
     def send_basic_auth_response(self, environ, start_response):
         realm = self.domain_controller.get_domain_realm(environ["PATH_INFO"], environ)
